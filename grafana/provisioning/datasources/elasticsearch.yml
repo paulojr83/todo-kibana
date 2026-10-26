@@ -1,0 +1,64 @@
+apiVersion: 1
+
+# Em provisioning, `$$` evita que o Grafana trate ${...} como variável de ambiente.
+datasources:
+  # Mesmos data streams que o Kibana usa (logs-todo.backend-default e logs-todo.frontend-default).
+  - name: Todo Logs (Elasticsearch)
+    uid: todo-logs
+    type: elasticsearch
+    access: proxy
+    url: http://elasticsearch:9200
+    isDefault: true
+    editable: false
+    jsonData:
+      index: 'logs-todo.*'
+      timeField: '@timestamp'
+      logMessageField: message
+      logLevelField: log.level
+      maxConcurrentShardRequests: 5
+      # Nos detalhes de um log, o trace.id abre o trace no Tempo.
+      dataLinks:
+        - field: trace.id
+          datasourceUid: tempo
+          url: '$${__value.raw}'
+          urlDisplayLabel: Ver trace no Tempo
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      # Span -> logs com o mesmo trace.id no Elasticsearch.
+      tracesToLogsV2:
+        datasourceUid: todo-logs
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        customQuery: true
+        query: 'trace.id:"$${__trace.traceId}"'
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      traceQuery:
+        timeShiftEnabled: true
+        spanStartTimeShift: '-30m'
+        spanEndTimeShift: '30m'
+      streamingEnabled:
+        search: true
+        metrics: true
+
+  # Métricas geradas pelo Tempo a partir dos spans (Service Graph, RED).
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    editable: false
+    jsonData:
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo

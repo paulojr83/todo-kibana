@@ -1,0 +1,62 @@
+# Tempo monolítico para desenvolvimento: recebe OTLP direto do backend e do navegador
+# e guarda os traces em disco.
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+          # O navegador envia os spans direto para cá, a partir de outra origem.
+          cors:
+            allowed_origins: ["http://localhost:3000", "http://localhost:3001"]
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 72h
+
+# A partir dos spans, gera as métricas do Service Graph / RED (enviadas ao Prometheus)
+# e os blocos locais que o Drilldown > Traces usa para as consultas de TraceQL metrics.
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+  traces_storage:
+    path: /var/tempo/generator/traces
+  processor:
+    # Nome dos nós de dependências não instrumentadas (ex.: o MongoDB). O padrão do
+    # Tempo só olha as convenções antigas (db.system/db.name); as instrumentações
+    # atuais do OpenTelemetry usam db.system.name/db.namespace.
+    service_graphs:
+      peer_attributes: [peer.service, db.system.name, db.system, db.namespace, db.name, server.address]
+    local_blocks:
+      filter_server_spans: false
+      flush_to_storage: true
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [service-graphs, span-metrics, local-blocks]

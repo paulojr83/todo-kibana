@@ -1,0 +1,231 @@
+.todo-container {
+  max-width: 760px;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.todo-header {
+  padding: 28px 32px 20px;
+  text-align: center;
+  color: #ffffff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.todo-header h1 {
+  font-size: 1.8rem;
+  margin-bottom: 6px;
+}
+
+.todo-header p {
+  opacity: 0.85;
+}
+
+/* Barra de métricas */
+.stats-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid #eceef5;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 8px;
+}
+
+.stat + .stat {
+  border-left: 1px solid #eceef5;
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8a8fa3;
+}
+
+.stat-value {
+  margin-top: 4px;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #4b3f9e;
+}
+
+/* Abas */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #eceef5;
+}
+
+.tab {
+  flex: 1;
+  padding: 14px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: none;
+  font-size: 0.95rem;
+  color: #6b7085;
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: #f7f7fc;
+}
+
+.tab.active {
+  border-bottom-color: #667eea;
+  color: #4b3f9e;
+  font-weight: 600;
+}
+
+.todo-section,
+.trace-section,
+.stats-section {
+  padding: 24px 32px 32px;
+}
+
+/* Botões */
+.btn {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btn:hover {
+  opacity: 0.85;
+}
+
+.btn-primary {
+  background: #667eea;
+  color: #ffffff;
+}
+
+.btn-danger {
+  background: #e5484d;
+  color: #ffffff;
+}
+
+.btn-small {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
+/* Tarefas */
+.input-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.todo-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #d8dbe8;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.todo-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.loading,
+.empty {
+  padding: 24px 0;
+  text-align: center;
+  color: #8a8fa3;
+}
+
+.todo-list {
+  list-style: none;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid #f0f1f6;
+}
+
+.todo-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #667eea;
+  cursor: pointer;
+}
+
+.todo-title {
+  flex: 1;
+  color: #2d3142;
+  word-break: break-word;
+}
+
+.todo-item.completed .todo-title {
+  color: #a3a7b8;
+  text-decoration: line-through;
+}
+
+/* Trace e estatísticas */
+.trace-container,
+.stats-container {
+  margin-top: 20px;
+}
+
+.trace-container h3,
+.stats-container h3 {
+  margin-bottom: 10px;
+  font-size: 1rem;
+  color: #2d3142;
+}
+
+.trace-content {
+  max-height: 420px;
+  overflow: auto;
+  padding: 16px;
+  border-radius: 8px;
+  background: #1e1f2b;
+  color: #d6d8e6;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.stats-table th,
+.stats-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid #eceef5;
+}
+
+.stats-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8a8fa3;
+}
+
+@media (max-width: 560px) {
+  .stats-bar {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .todo-section,
+  .trace-section,
+  .stats-section {
+    padding: 20px 16px 24px;
+  }
+}

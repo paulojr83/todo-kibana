@@ -1,0 +1,187 @@
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: todo-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - todo-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - todo-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health?local=true | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.19.0
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - BACKEND_URL=http://host.docker.internal:3000/api/todos
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - todo-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5601/api/status | grep -q '\"level\":\"available\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  # Executa uma vez por `docker compose up` (idempotente): prepara os data streams
+  # de log/APM e cria a data view / busca salva no Kibana.
+  kibana-setup:
+    image: curlimages/curl:8.10.1
+    container_name: todo-kibana-setup
+    depends_on:
+      kibana:
+        condition: service_healthy
+    networks:
+      - todo-network
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        echo 'Elasticsearch: 0 réplicas nos data streams logs-*, traces-* e metrics-* (cluster de um nó)'
+        for type in logs traces metrics; do
+          curl -sSf -o /dev/null -X PUT "http://elasticsearch:9200/_component_template/$${type}@custom" \
+            -H 'Content-Type: application/json' -d '{"template":{"settings":{"index":{"number_of_replicas":0}}}}'
+        done
+        curl -sSf -o /dev/null -X PUT 'http://elasticsearch:9200/logs-todo.*/_settings' \
+          -H 'Content-Type: application/json' -d '{"index":{"number_of_replicas":0}}'
+
+        echo 'Kibana: data view "Todo - Logs" (logs-todo.*)'
+        curl -sSf -o /dev/null --retry 10 --retry-all-errors --retry-delay 5 \
+          -X POST 'http://kibana:5601/api/data_views/data_view' -H 'kbn-xsrf: true' -H 'Content-Type: application/json' \
+          -d '{"override":true,"data_view":{"id":"todo-logs","name":"Todo - Logs","title":"logs-todo.*","timeFieldName":"@timestamp"}}'
+        curl -sSf -o /dev/null -X POST 'http://kibana:5601/api/data_views/default' \
+          -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -d '{"data_view_id":"todo-logs","force":true}'
+
+        echo 'Kibana: busca salva "Todo - Logs"'
+        curl -sSf -o /dev/null -X POST 'http://kibana:5601/api/saved_objects/search/todo-logs-search?overwrite=true' \
+          -H 'kbn-xsrf: true' -H 'Content-Type: application/json' \
+          -d '{"attributes":{"title":"Todo - Logs","columns":["service.name","log.level","log.logger","message","http.request.id"],"sort":[["@timestamp","desc"]],"kibanaSavedObjectMeta":{"searchSourceJSON":"{\"query\":{\"query\":\"\",\"language\":\"kuery\"},\"filter\":[],\"indexRefName\":\"kibanaSavedObjectMeta.searchSourceJSON.index\"}"}},"references":[{"name":"kibanaSavedObjectMeta.searchSourceJSON.index","type":"index-pattern","id":"todo-logs"}]}'
+
+        echo 'Pronto: logs em http://localhost:5601/app/discover'
+
+  # Grava traces de agentes Elastic APM / OTLP (porta 8200) em traces-apm*, para o
+  # Kibana APM. As aplicações deste projeto enviam traces só para o Tempo.
+  apm-server:
+    image: docker.elastic.co/apm/apm-server:8.19.0
+    container_name: todo-apm-server
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kibana-setup:
+        condition: service_completed_successfully
+    ports:
+      - "8200:8200"
+    networks:
+      - todo-network
+    command:
+      - apm-server
+      - -e
+      - -E
+      - apm-server.host=0.0.0.0:8200
+      - -E
+      - apm-server.rum.enabled=true
+      - -E
+      - apm-server.rum.allow_origins=["http://localhost:3000","http://localhost:3001"]
+      - -E
+      - output.elasticsearch.hosts=["http://elasticsearch:9200"]
+
+  # Recebe OTLP direto do backend e do navegador e armazena os traces para o Grafana
+  # (Explore > Tempo, Drilldown > Traces). Config em ./tempo.
+  tempo:
+    build: ./tempo
+    image: todo-tempo:local
+    container_name: todo-tempo
+    depends_on:
+      - prometheus
+    command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP (backend e navegador)
+    volumes:
+      - tempo_data:/var/tempo
+    networks:
+      - todo-network
+
+  # Recebe do Tempo as métricas geradas a partir dos spans (Service Graph, RED).
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: todo-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    volumes:
+      - prometheus_data:/prometheus
+    networks:
+      - todo-network
+
+  # Grafana lendo os mesmos logs (data streams logs-todo.*) do Elasticsearch.
+  # Datasource e dashboard vêm de ./grafana, copiados na imagem (ver grafana/Dockerfile).
+  grafana:
+    build: ./grafana
+    image: todo-grafana:local
+    container_name: todo-grafana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "3030:3000" # a 3000 do host é do frontend
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # Acesso sem login como Editor (o Explore exige pelo menos Editor).
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Editor
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/todo-logs.json
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - todo-network
+
+volumes:
+  mongodb_data:
+  elasticsearch_data:
+  grafana_data:
+  tempo_data:
+  prometheus_data:
+
+networks:
+  todo-network:
+    driver: bridge
